@@ -1,0 +1,92 @@
+trigger:
+- main
+
+variables:
+  imageName: 'walletdoc-app'
+
+stages:
+- stage: Build
+  displayName: 'Build Docker Image'
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+    - task: Docker@2
+      inputs:
+        containerRegistry: '$(dockerRegistryServiceConnection)'
+        repository: '$(imageName)'
+        command: 'buildAndPush'
+        Dockerfile: '**/Dockerfile'
+        tags: |
+          $(Build.BuildId)
+
+- stage: Dev
+  displayName: 'Deploy to Dev'
+  dependsOn: Build
+  jobs:
+  - job: DeployDev
+    pool: 'WDKubePool'
+    steps:
+    - checkout: self
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: 'sed -i ''s/\r$//'' ''./configure-ingress-controller.sh'''
+        workingDirectory: "testportal/"
+    - task: Bash@3
+      inputs:
+        filePath: 'testportal/configure-ingress-controller.sh'
+        arguments: 'walletdoc2 k8s/dev'
+        workingDirectory: "testportal/"
+
+- stage: Staging
+  displayName: 'Deploy to Staging'
+  dependsOn: Dev
+  condition: succeeded()
+  approval:
+    approvals:
+      - name: 'Staging Approval'
+        reviewers:
+          - '<insert-user-alias>'
+  jobs:
+  - job: DeployStaging
+    pool: 'WDKubePool'
+    steps:
+    - checkout: self
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: 'sed -i ''s/\r$//'' ''./configure-ingress-controller.sh'''
+        workingDirectory: "testportal/"
+    - task: Bash@3
+      inputs:
+        filePath: 'testportal/configure-ingress-controller.sh'
+        arguments: 'walletdoc3 k8s/staging'
+        workingDirectory: "testportal/"
+
+- stage: Prod
+  displayName: 'Deploy to Production'
+  dependsOn: Staging
+  condition: succeeded()
+  approval:
+    approvals:
+      - name: 'Production Approval'
+        reviewers:
+          - '<insert-user-alias>'
+  jobs:
+  - job: DeployProd
+    pool: 'WDKubePool'
+    steps:
+    - checkout: self
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: 'sed -i ''s/\r$//'' ''./configure-ingress-controller.sh'''
+        workingDirectory: "testportal/"
+    - task: Bash@3
+      inputs:
+        filePath: 'testportal/configure-ingress-controller.sh'
+        arguments: 'walletdoc4 k8s/prod'
+        workingDirectory: "testportal/"
